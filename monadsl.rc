@@ -1,0 +1,73 @@
+#!/bin/sh
+#
+# monadsl         MonADSL control script (0.9) designed to allow an easy
+#                 command line interface to controlling MonADSL.
+#                 Written by: Mattias Ohlsson (Mon)
+#		  mon@inprose.com
+#                 www.inprose.com
+#
+# chkconfig: 2345 50 50
+# description: monadsl takes care of starting and stopping MonADSL. By Mattias Ohlsson (Mon) www.inprose.com
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# the path to your monadsl binary, including options if necessary
+MONADSL=/usr/local/bin/monadsl
+
+RETVAL=0
+
+PROG="monadsl"
+
+
+start()
+{
+	# Start
+	echo -n $"Starting $PROG: "
+	$MONADSL --login > /dev/null
+	RETVAL=$?
+	[ $RETVAL -ne 0 ] && failure $"$PROG startup"
+ 	[ $RETVAL -eq 0 ] && touch /var/lock/subsys/monadsl && success $"$PROG startup"
+	echo
+	return $RETVAL
+}
+
+stop()
+{
+	# Stop
+	echo -n $"Stopping $PROG: "
+	killproc monadsl
+	RETVAL=$?
+	$MONADSL --logout > /dev/null
+	[ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/monadsl
+	echo
+	return $RETVAL
+}
+
+restart()
+{
+		stop
+		start
+}
+
+
+# See how we were called.
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		restart
+		;;
+	status)
+		$MONADSL --status
+		;;
+	*)
+		echo  $"Usage: $0 {start|stop|restart|status}"
+		exit 1
+esac
+
+exit $?
