@@ -5,7 +5,7 @@ use IO::Socket;
 
 my($pwd, $usr, $server, $port, $remote, $daemon, $delay, $returncode);
 
-print "MonADSL 0.8-2 by Mon - www.inprose.com\n";
+print "MonADSL 1.0 by Mon - www.inprose.com\n";
 
 
 if(@ARGV < 1) {
@@ -173,6 +173,8 @@ sub login {
 
                 print "\tVerifying session...\t\t\t";
 
+		sleep(1);
+
                 if(status()) {
                         print "OK\n";
                         return 1;
@@ -187,7 +189,7 @@ sub login {
 
 sub logout {
 
-        print "\tConnecting to $server:$port...\t";
+        print "\tConnecting to $server:$port...\t\t";
 
         if(opensock($server, $port)) {
                 print "OK\n";
