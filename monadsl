@@ -1,0 +1,333 @@
+#!/usr/bin/perl
+use strict;
+use POSIX qw(setsid);
+use IO::Socket;
+
+my($pwd, $usr, $server, $port, $remote, $daemon, $delay, $returncode);
+
+print "MonADSL 0.8-2 by Mon - www.inprose.com\n";
+
+
+if(@ARGV < 1) {
+
+        usage();
+        exit 1;
+}
+
+
+if($ARGV[0] eq '-c' || $ARGV[0] eq '--config') { config(); }
+
+unless(-e "/etc/monadsl.conf") {
+        print "Could not open configuration file (/etc/monadsl.conf).\n".
+              "Run '$0 -c' or create one manually.\n";
+        exit 1;
+}
+
+if(!readconf("/etc/monadsl.conf")) {
+	print "Configuration broken. Run '$0 -c' or edit\nthe configuration ".
+	      "file (/etc/monadsl.conf) manually.\n";
+	exit 1;
+}
+
+
+if($ARGV[0] eq '-l' || $ARGV[0] eq '--login') {
+
+        if($returncode = login()) {
+                if($returncode == 1) {
+                        print "Login successful!\n";
+                } else {
+                        print "Already logged in!\n";
+                }
+
+                daemon();
+
+                exit 0;
+        } else {
+                print "Login failed!\n";
+                daemon();
+                exit 1;
+
+        }
+
+
+}elsif($ARGV[0] eq '-o' || $ARGV[0] eq '--logout') {
+
+        if(daemon("stop")) {
+		print "\tStopping daemon...\t\t\tOK\n";
+	}
+
+        if(logout()) {
+
+                print "Logout successful!\n";
+                exit 0;
+        } else {
+                print "Logout failed!\n";
+                exit 1;
+
+        }
+
+} elsif($ARGV[0] eq '-s' || $ARGV[0] eq '--status') {
+
+        if(daemon("status")) {
+                print "Daemon running\n";
+        }
+
+        if(status()) {
+                print "Connected\n";
+		exit 0;
+        } else {
+                print "Not connected\n";
+		exit 1;
+        }
+
+
+} else {
+
+        usage();
+
+}
+
+sub daemon {
+	my($pid, $oldpid);
+
+	$oldpid = `pidof -o $$ monadsl`;
+
+	if($_[0] eq 'status') { 
+		if($oldpid gt 0) {
+			return 1;
+		} else {
+			return 0;
+		}
+	}
+
+        if($daemon ne 'yes') { return 0 };
+
+	if($oldpid gt 0) { system("kill $oldpid"); }
+
+	if($_[0] eq 'stop') {
+		if($oldpid gt 0) {
+			return 1;
+		} else {
+			return 0;
+		}
+	}
+
+        if($pid = fork()) {
+		if($oldpid gt 0) {
+	                print "monadsl daemon restarted (PID=$pid)\n";
+		} else {
+			print "monadsl daemon started (PID=$pid)\n";
+		}
+
+		return 1;
+
+        } elsif(defined $pid) {
+		setsid or die "Can't start a new session: $!";
+		$0 = "monadsl";
+		chdir("/");
+		umask 0;
+		close(STDIN);
+		close(STDOUT);
+		close(STDERR);
+                while(1) {
+                        login();
+                        sleep($delay);
+                }
+        } else {
+                print "Can't start daemon\n";
+        }        
+}
+
+sub login {
+
+        print "\tConnecting to $server:$port...\t\t";
+
+        if(opensock($server, $port)) {
+                print "OK\n";
+        } else {
+                print "FAILED\n";
+                return 0;
+        }
+
+        print "\tChecking connection state...\t\t";
+
+
+        if(status()) {
+                print "OK\n";
+                return 2;
+        } else {
+
+                print "OK\n";
+
+                print "\tSending username and password...\t";
+
+                $remote = opensock($server, $port);
+
+                print $remote "POST /sd/login HTTP/1.0\n".
+                        "Host: $server\n".
+                        "Content-type: application/x-www-form-urlencoded\n".
+                        "Content-length: 58\n\n".
+                        "username=$usr&password=$pwd&submitForm=Logga+in\n\n";
+
+                print "OK\n";
+
+                print "\tVerifying session...\t\t\t";
+
+                if(status()) {
+                        print "OK\n";
+                        return 1;
+                } else {
+                        print "FAILED\n";
+                        return 0;
+                }
+        }
+
+}
+
+
+sub logout {
+
+        print "\tConnecting to $server:$port...\t";
+
+        if(opensock($server, $port)) {
+                print "OK\n";
+        } else {
+                print "FAILED\n";
+                return 0;
+        }
+
+        print "\tChecking connection state...\t\t";
+
+        if(status()) {
+
+                print "OK\n";
+
+                print "\tSending logout request...\t\t";
+                opensock($server, $port);
+                print $remote "GET /sd/logout HTTP/1.0\n".
+                      "Referer: http://$server/sd/init\n".
+                      "Host: $server\n\n";
+
+                print "OK\n";
+
+        } else {
+
+                print "OK\n";
+                print "Not connected!\n";
+                exit 1;
+
+        }
+
+        print "\tVerifying session...\t\t\t";
+
+        if(status()) {
+                print "FAILED\n";
+                return 0;
+        } else {
+                print "OK\n";
+                return 1;
+        }
+
+        close ($remote) || die "close: $!";
+}
+
+sub findstring {
+        my($line);
+
+        while(defined($line = <$remote>)) {
+                if($line =~ /$_[0]/) {
+                        return 1
+                }
+        }
+}
+
+sub status {
+
+        $remote = opensock($server, $port);
+
+        if($remote) {
+
+                print $remote "GET /sd/init HTTP/1.0\n".
+                              "Host: $server\n\n";
+
+                if(findstring("create_session")) {
+                        return 1;
+                } elsif(findstring("avslutat")) {
+			return 0;
+                }
+
+        } else {
+                return 0;
+        }
+
+}
+
+sub opensock() {
+
+        $remote = IO::Socket::INET->new(Proto => "tcp",
+                PeerAddr => $_[0], PeerPort => $_[1],);
+
+        return $remote;
+}
+
+
+sub config {
+
+        print "Input username: ";
+        $usr = <STDIN>;
+        print "Input password: ";
+        $pwd = <STDIN>;
+
+        open(F, ">/etc/monadsl.conf") or die("Could not open file /etc/monadsl.conf");
+        print "Creating /etc/monadsl.conf.\n";
+
+        print F "# MonADSL Configuration file.\n# www.inprose.com\n\n\n".
+                "# Username\nUSR=$usr\n# Password\nPWD=$pwd\n".
+		"# Daemon (yes/no)\nDAEMON=yes\n\n# Daemon delay in minutes\nDELAY=15\n\n".
+		"# Login server\nSERVER=10.0.0.6\n\n# Port\nPORT=80\n";
+        close(F);
+	system("chmod 600 /etc/monadsl.conf");
+
+        exit 0;
+}
+
+sub readconf {
+	my $line;
+
+	open(FH, $_[0]);
+
+	foreach $line (<FH>) {
+		chomp $line;
+		$usr = $1 if($line =~ /^USR=(.*)/);
+		$pwd = $1 if($line =~ /^PWD=(.*)/);
+		$daemon = $1 if($line =~ /^DAEMON=(.*)/);
+		$delay =  $1 if($line =~ /^DELAY=(.*)/);
+		$server = $1 if($line =~ /^SERVER=(.*)/);
+		$port = $1 if($line =~ /^PORT=(.*)/);
+	}
+	close(FH);
+
+	if($usr && $pwd && $daemon && $server && $port) {
+		if($daemon eq 'yes') {
+			if($delay) {
+				return 1;
+			} else {
+				return 0;
+			}
+		} else {
+			return 1;
+		}
+	} else {
+		return 0;
+	}
+
+}
+
+sub usage() {
+        print "\nusage: monadsl [argument]\n";
+        print "\nArguments:";
+        print "\n   -l, --login\t\tLogging in";
+        print "\n   -o, --logout\t\tLogging out";
+        print "\n   -s, --status\t\tPrint status";
+        print "\n   -c, --config\t\tCreate configfile\n";
+}
